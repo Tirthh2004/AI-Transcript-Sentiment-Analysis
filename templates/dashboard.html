@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">RelaySentiment Dashboard</h1>
+    </div>
+    <div class="flex gap-sm">
+        <button class="btn btn-secondary" onclick="openManualTranscriptModal()" id="btn-manual-transcript">
+            ➕ Add Manual Transcript
+        </button>
+        <button class="btn btn-secondary" onclick="document.getElementById('upload-transcript-input').click()" id="btn-upload-transcript">
+            📁 Upload Transcript
+        </button>
+        <input type="file" id="upload-transcript-input" accept=".txt,.md" style="display:none;" onchange="handleUploadTranscript(event)" />
+        <button class="btn btn-primary" onclick="triggerSync()" id="btn-sync">
+            🔄 Sync Now
+        </button>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="stats-grid">
+    <div class="stat-card accent-blue">
+        <div class="stat-icon">📞</div>
+        <div class="stat-value" id="stat-total">{{ stats.analyzed_transcripts }}</div>
+        <div class="stat-label">Calls Analyzed</div>
+    </div>
+    <div class="stat-card accent-red">
+        <div class="stat-icon">😟</div>
+        <div class="stat-value" id="stat-unhappy">{{ stats.unhappy_customers }}</div>
+        <div class="stat-label">Unhappy Customers</div>
+    </div>
+    <div class="stat-card accent-green">
+        <div class="stat-icon">📈</div>
+        <div class="stat-value" id="stat-score">{{ "%.2f"|format(stats.avg_customer_score) }}</div>
+        <div class="stat-label">Avg. Customer Score</div>
+    </div>
+    <div class="stat-card accent-yellow">
+        <div class="stat-icon">⚡</div>
+        <div class="stat-value" id="stat-alerts">{{ stats.alerts_today }}</div>
+        <div class="stat-label">Alerts Today</div>
+    </div>
+</div>
+
+
+
+    <!-- Recent Alerts -->
+    <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-header">
+            <h2 class="card-title">Recent Alerts</h2>
+            <a href="/alerts" class="btn btn-sm btn-secondary">View All</a>
+        </div>
+        {% if recent_alerts %}
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+        {% for alert in recent_alerts[:4] %}
+        <div class="alert-card severity-{{ alert.severity }}"
+            onclick="window.location='/transcript/{{ alert.transcript_id }}'">
+            <span class="alert-icon">
+                {% if alert.severity == 'severe' %}🚨{% elif alert.severity == 'moderate' %}⚠️{% else %}💡{% endif %}
+            </span>
+            <div class="alert-content">
+                <div class="alert-title truncate">{{ alert.title }}</div>
+                <div class="alert-meta">
+                    <span class="badge badge-{{ alert.severity }}">{{ alert.severity }}</span>
+                    <span>{{ alert.trigger_type }}</span>
+                    <span>{{ alert.created_at[:16] if alert.created_at else '' }}</span>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">✅</div>
+            <div class="empty-state-title">No alerts</div>
+            <div class="empty-state-text">All customers are happy! No sentiment warnings detected.</div>
+        </div>
+        {% endif %}
+    </div>
+
+<!-- Filter Bar -->
+<div class="filter-bar mt-xl">
+    <span class="text-muted" style="font-size: 0.8rem; font-weight: 600;">FILTER:</span>
+    <a href="/?warning=all" class="filter-btn {% if warning_filter == 'all' %}active{% endif %}">All</a>
+    <a href="/?warning=none" class="filter-btn {% if warning_filter == 'none' %}active{% endif %}">✅ No Warning</a>
+    <a href="/?warning=mild" class="filter-btn {% if warning_filter == 'mild' %}active{% endif %}">💡 Mild</a>
+    <a href="/?warning=moderate" class="filter-btn {% if warning_filter == 'moderate' %}active{% endif %}">⚠️ Moderate</a>
+    <a href="/?warning=severe" class="filter-btn {% if warning_filter == 'severe' %}active{% endif %}">🚨 Severe</a>
+</div>
+
+<!-- Transcripts Table -->
+<div class="card">
+    {% if results %}
+    <div style="overflow-x: auto;">
+        <table class="data-table" id="transcripts-table">
+            <thead>
+                <tr>
+                    <th>Call Title</th>
+                    <th>Date</th>
+                    <th>Duration</th>
+                    <th>Customer Score</th>
+                    <th>Positive</th>
+                    <th>Neutral</th>
+                    <th>Negative</th>
+                    <th>Trajectory</th>
+                    <th>Warning</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in results %}
+                <tr onclick="window.location='/transcript/{{ r.transcript_id }}'" id="transcript-row-{{ r.transcript_id }}">
+                    <td style="max-width: 250px;" class="truncate">
+                        <strong>{{ r.title or 'Untitled' }}</strong>
+                    </td>
+                    <td style="white-space: nowrap;">{{ r.date_string[:10] if r.date_string else 'N/A' }}</td>
+                    <td>{{ r.duration|format_duration }}</td>
+                    <td>
+                        <span class="score-display" style="{{ 'color: ' ~ r.customer_score|score_color }}">
+                            {{ r.customer_score|format_score }}
+                        </span>
+                    </td>
+                    <td class="text-positive">{{ r.positive_pct|format_pct }}</td>
+                    <td class="text-neutral">{{ r.neutral_pct|format_pct }}</td>
+                    <td class="text-negative">{{ r.negative_pct|format_pct }}</td>
+                    <td>
+                        {% if r.sentiment_trajectory == 'improving' %}
+                            <span class="text-positive">📈 Improving</span>
+                        {% elif r.sentiment_trajectory == 'deteriorating' %}
+                            <span class="text-negative">📉 Deteriorating</span>
+                        {% else %}
+                            <span class="text-muted">➡️ Stable</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ r.warning_level }}">
+                            {% if r.warning_level == 'severe' %}🚨{% elif r.warning_level == 'moderate' %}⚠️{% elif r.warning_level == 'mild' %}💡{% else %}✅{% endif %}
+                            {{ r.warning_level }}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" onclick="deleteTranscript(event, '{{ r.transcript_id }}')" title="Delete Transcript">🗑️</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📝</div>
+        <div class="empty-state-title">No transcripts found</div>
+        <div class="empty-state-text">
+            {% if warning_filter != 'all' %}
+                No transcripts match this filter. <a href="/?warning=all">Show all</a>
+            {% else %}
+                Load demo data or configure your Fireflies API key to get started.
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Manual Transcript Modal -->
+<div id="manual-transcript-modal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h2>➕ Add Manual Transcript</h2>
+            <button class="close-btn" onclick="closeManualTranscriptModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 16px;">
+                Paste a transcript below. The format should be <code>Speaker Name: 00:00</code> followed by their text on the next line.
+            </p>
+            <div class="form-group">
+                <label class="form-label">Title</label>
+                <input type="text" id="manual-title" class="form-input" placeholder="e.g. Q3 Sales Call">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Date</label>
+                <input type="date" id="manual-date" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Organizer Email (Optional)</label>
+                <input type="email" id="manual-email" class="form-input" placeholder="rep@yourcompany.com">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Transcript Content</label>
+                <textarea id="manual-content" class="form-input" rows="10" placeholder="John Doe: 00:00&#10;Hello, how are you?&#10;&#10;Jane Smith: 00:05&#10;I am doing well, thank you!"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeManualTranscriptModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="submitManualTranscript()" id="btn-submit-manual">Submit Transcript</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+});
+
+function deleteTranscript(event, transcriptId) {
+    event.stopPropagation(); // Prevent row click from triggering navigation
+    if (confirm("Are you sure you want to delete this transcript? This action cannot be undone.")) {
+        fetch('/api/transcripts/' + transcriptId, {
+            method: 'DELETE',
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert("Failed to delete transcript: " + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert("An error occurred while deleting the transcript.");
+        });
+    }
+}
+</script>
+{% endblock %}

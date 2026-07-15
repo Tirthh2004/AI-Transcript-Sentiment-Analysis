@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+{% block title %}{{ transcript.title or 'Transcript' }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="/" style="font-size: 0.8rem; color: var(--text-muted);">← Back to Transcripts</a>
+        <h1 class="page-title" style="margin-top: 8px;">{{ transcript.title or 'Untitled Call' }}</h1>
+        <p class="page-subtitle">
+            {{ transcript.date_string[:10] if transcript.date_string else '' }}
+            &nbsp;·&nbsp; {{ transcript.duration|format_duration }}
+            {% if result %}
+            &nbsp;·&nbsp;
+            <span class="badge badge-{{ result.warning_level }}">
+                {% if result.warning_level == 'severe' %}🚨{% elif result.warning_level == 'moderate' %}⚠️{% elif result.warning_level == 'mild' %}💡{% else %}✅{% endif %}
+                {{ result.warning_level }} warning
+            </span>
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+{% if result %}
+<!-- Stats Row -->
+<div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+    <div class="stat-card accent-blue">
+        <div class="stat-icon">🎯</div>
+        <div class="stat-value" style="font-size: 1.6rem;">{{ result.overall_score|format_score }}</div>
+        <div class="stat-label">Overall Score</div>
+    </div>
+    <div class="stat-card {% if result.customer_score < -0.2 %}accent-red{% elif result.customer_score < 0.1 %}accent-yellow{% else %}accent-green{% endif %}">
+        <div class="stat-icon">😊</div>
+        <div class="stat-value" style="font-size: 1.6rem;">{{ result.customer_score|format_score }}</div>
+        <div class="stat-label">Customer Score</div>
+    </div>
+    <div class="stat-card accent-green">
+        <div class="stat-icon">👍</div>
+        <div class="stat-value" style="font-size: 1.6rem;">{{ result.positive_pct|format_pct }}</div>
+        <div class="stat-label">Positive</div>
+    </div>
+    <div class="stat-card accent-red">
+        <div class="stat-icon">👎</div>
+        <div class="stat-value" style="font-size: 1.6rem;">{{ result.negative_pct|format_pct }}</div>
+        <div class="stat-label">Negative</div>
+    </div>
+    <div class="stat-card {% if result.sentiment_trajectory == 'deteriorating' %}accent-red{% elif result.sentiment_trajectory == 'improving' %}accent-green{% else %}accent-blue{% endif %}">
+        <div class="stat-icon">
+            {% if result.sentiment_trajectory == 'improving' %}📈{% elif result.sentiment_trajectory == 'deteriorating' %}📉{% else %}➡️{% endif %}
+        </div>
+        <div class="stat-value" style="font-size: 1.2rem;">{{ result.sentiment_trajectory|title }}</div>
+        <div class="stat-label">Trajectory</div>
+    </div>
+</div>
+
+<!-- Sentiment Timeline (Full Width) -->
+<div class="card mb-lg">
+    <div class="card-header">
+        <h2 class="card-title">Sentiment Timeline</h2>
+        <span class="text-muted" style="font-size: 0.75rem;">Score progression through the call</span>
+    </div>
+    <div class="chart-container" id="timelineChart" style="min-height: 250px;"></div>
+
+    <!-- Visual Sentiment Bar -->
+    <div class="sentiment-timeline mt-md" style="padding: 0 var(--space-md);">
+        <div class="timeline-bar">
+            {% for s in sentences %}
+            <div class="timeline-segment {{ s.ensemble_label }}"
+                 title="{{ s.speaker_name }}: {{ s.text[:60] }}... ({{ s.ensemble_score }})"></div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <!-- Left Column (Wide) -->
+    <div class="flex flex-col gap-lg" style="grid-column: 1;">
+        <!-- Speaker Breakdown -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Speaker Analysis</h2>
+            </div>
+            {% if result.speaker_sentiments %}
+            <div class="speaker-stats-list">
+                {% for name, data in result.speaker_sentiments.items() %}
+                <div class="speaker-row">
+                    <div class="speaker-row-info">
+                        <div class="speaker-avatar-circle">
+                            {{ name[:2]|upper }}
+                        </div>
+                        <div>
+                            <div class="speaker-name-text">{{ name }}</div>
+                            <div class="speaker-role-badge {{ data.role|lower }}">{{ data.role }}</div>
+                        </div>
+                    </div>
+                    <div class="speaker-row-sentiment">
+                        {% set total = data.positive_count + data.neutral_count + data.negative_count %}
+                        <div class="speaker-sentiment-bar" title="+{{ data.positive_count }} / ○{{ data.neutral_count }} / -{{ data.negative_count }}">
+                            {% if total > 0 %}
+                                <div class="sentiment-bar-segment positive" style="width: {{ (data.positive_count / total * 100)|round }}%;"></div>
+                                <div class="sentiment-bar-segment neutral" style="width: {{ (data.neutral_count / total * 100)|round }}%;"></div>
+                                <div class="sentiment-bar-segment negative" style="width: {{ (data.negative_count / total * 100)|round }}%;"></div>
+                            {% else %}
+                                <div class="sentiment-bar-segment neutral" style="width: 100%;"></div>
+                            {% endif %}
+                        </div>
+                        <div class="speaker-sentence-count">{{ data.sentence_count }} sentences &nbsp;·&nbsp; <span class="text-positive">+{{ data.positive_count }}</span> <span class="text-neutral">○{{ data.neutral_count }}</span> <span class="text-negative">-{{ data.negative_count }}</span></div>
+                    </div>
+                    <div class="speaker-row-score">
+                        <div class="speaker-score-value" style="{{ 'color: ' ~ data.avg_score|score_color }}">
+                            {{ "%.2f"|format(data.avg_score) }}
+                        </div>
+                        <div class="speaker-score-label">Avg Score</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Right Column (Sidebar) -->
+    <div class="flex flex-col gap-lg" style="grid-column: 2;">
+        <!-- Sentiment Breakdown Pie Chart -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Sentiment Breakdown</h2>
+            </div>
+            <div class="chart-container" id="sentimentPieChart" style="min-height: 250px; max-height: 250px;"></div>
+        </div>
+
+        <!-- Key Negative Moments -->
+        {% if result.key_negative_moments %}
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">⚠️ Key Negative Moments</h2>
+            </div>
+            <div class="key-moments-list">
+                {% for moment in result.key_negative_moments %}
+                <div class="key-moment" style="margin-bottom: 12px; &:last-child { margin-bottom: 0; }">
+                    <div class="key-moment-text">"{{ moment.text }}"</div>
+                    <div class="key-moment-meta">
+                        Speaker: <strong>{{ moment.speaker }}</strong> &nbsp;·&nbsp;
+                        Score: <span style="{{ 'color: ' ~ moment.score|score_color }}; font-weight: 700;">{{ "%.2f"|format(moment.score) }}</span> &nbsp;·&nbsp;
+                        Time: {{ moment.timestamp|format_time }}
+                        {% if moment.keyword_trigger %}
+                        &nbsp;·&nbsp; Keyword: <strong>{{ moment.keyword_trigger }}</strong>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Conversation View -->
+<div class="card mt-lg">
+    <div class="card-header">
+        <h2 class="card-title">Full Conversation</h2>
+        <span class="text-muted" style="font-size: 0.75rem;">{{ sentences|length }} sentences • Color-coded by sentiment</span>
+    </div>
+    <div class="conversation">
+        {% for s in sentences %}
+        <div class="message-bubble {{ s.speaker_role|lower if s.speaker_role else 'customer' }} sentiment-{{ s.ensemble_label }}"
+             id="sentence-{{ s.sentence_index }}">
+            <div class="message-avatar">
+                {{ s.speaker_name[:2] if s.speaker_name else '??' }}
+            </div>
+            <div class="message-body">
+                <div class="message-header">
+                    <span class="message-speaker">{{ s.speaker_name }}</span>
+                    <span class="message-time">{{ s.start_time|format_time }}</span>
+                    <span class="badge badge-{{ s.ensemble_label }}" style="font-size: 0.6rem;">{{ s.ensemble_label }}</span>
+                </div>
+                <div class="message-text">{{ s.text }}</div>
+                <div class="message-sentiment" style="{{ 'color: ' ~ s.ensemble_score|score_color }}">
+                    Score: {{ "%.2f"|format(s.ensemble_score) }}
+                    {% if s.vader_score %}· V:{{ "%.2f"|format(s.vader_score) }}{% endif %}
+                    {% if s.transformer_score %}· T:{{ "%.2f"|format(s.transformer_score) }}{% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+{% if alerts %}
+<!-- Alerts for this transcript -->
+<div class="card mt-lg">
+    <div class="card-header">
+        <h2 class="card-title">🔔 Alerts for This Call</h2>
+    </div>
+    {% for alert in alerts %}
+    <div class="alert-card severity-{{ alert.severity }}">
+        <span class="alert-icon">
+            {% if alert.severity == 'severe' %}🚨{% elif alert.severity == 'moderate' %}⚠️{% else %}💡{% endif %}
+        </span>
+        <div class="alert-content">
+            <div class="alert-title">{{ alert.trigger_type|title }} Alert — {{ alert.severity|title }}</div>
+            <div class="alert-message">{{ alert.message }}</div>
+            <div class="alert-meta">
+                <span class="badge badge-{{ alert.severity }}">{{ alert.severity }}</span>
+                <span>Status: {{ alert.status }}</span>
+                <span>{{ alert.created_at[:16] if alert.created_at else '' }}</span>
+            </div>
+        </div>
+        <div class="alert-actions">
+            {% if alert.status == 'new' %}
+            <button class="btn btn-sm btn-secondary" onclick="updateAlertStatus({{ alert.id }}, 'acknowledged')">
+                ✓ Acknowledge
+            </button>
+            {% elif alert.status == 'acknowledged' %}
+            <button class="btn btn-sm btn-secondary" onclick="updateAlertStatus({{ alert.id }}, 'resolved')">
+                ✅ Resolve
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="empty-state-icon">🔍</div>
+        <div class="empty-state-title">Analysis not available</div>
+        <div class="empty-state-text">This transcript hasn't been analyzed yet. Run a sync to analyze it.</div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if sentences %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Sentiment Timeline Chart
+    const sentences = {{ sentences|tojson }};
+    const indices = sentences.map((s, i) => i);
+    const scores = sentences.map(s => s.ensemble_score || 0);
+    const speakers = sentences.map(s => s.speaker_name || 'Unknown');
+    const texts = sentences.map(s => (s.text || '').substring(0, 60) + '...');
+    const roles = sentences.map(s => s.speaker_role || 'Unknown');
+    const colors = scores.map(s => s >= 0.15 ? '#0d9488' : (s <= -0.15 ? '#e11d48' : '#d97706'));
+
+    // Customer-only trace
+    const customerIndices = [];
+    const customerScores = [];
+    sentences.forEach((s, i) => {
+        if (s.speaker_role === 'Customer') {
+            customerIndices.push(i);
+            customerScores.push(s.ensemble_score || 0);
+        }
+    });
+
+    Plotly.newPlot('timelineChart', [
+        {
+            x: indices,
+            y: scores,
+            type: 'bar',
+            name: 'All Speakers',
+            text: texts,
+            customdata: speakers,
+            marker: { color: colors, opacity: 0.5 },
+            hovertemplate: '<b>%{customdata}</b><br>%{text}<br>Score: %{y:.2f}<extra></extra>'
+        },
+        {
+            x: customerIndices,
+            y: customerScores,
+            type: 'bar',
+            name: 'Customer Only',
+            marker: { color: customerScores.map(s => s >= 0.15 ? '#0d9488' : (s <= -0.15 ? '#e11d48' : '#d97706')) },
+            hovertemplate: 'Customer Score: %{y:.2f}<extra></extra>'
+        }
+    ], {
+        barmode: 'overlay',
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+        font: { family: 'Plus Jakarta Sans', color: '#475569', size: 11 },
+        margin: { l: 45, r: 15, t: 5, b: 35 },
+        xaxis: {
+            gridcolor: 'rgba(0,0,0,0.04)',
+            title: { text: 'Sentence #', font: { size: 10 } },
+        },
+        yaxis: {
+            gridcolor: 'rgba(0,0,0,0.04)',
+            zeroline: true,
+            zerolinecolor: 'rgba(0,0,0,0.08)',
+            range: [-1.1, 1.1],
+            title: { text: 'Sentiment', font: { size: 10 } },
+        },
+        showlegend: true,
+        legend: { font: { size: 10 }, orientation: 'h', y: 1.1 },
+        shapes: [{
+            type: 'rect',
+            xref: 'paper', yref: 'y',
+            x0: 0, x1: 1, y0: -1.1, y1: -0.15,
+            fillcolor: 'rgba(225, 29, 72, 0.03)',
+            line: { width: 0 },
+        }],
+    }, { responsive: true, displayModeBar: false });
+
+    // Sentiment Pie Chart
+    Plotly.newPlot('sentimentPieChart', [{
+        values: [{{ result.positive_pct|default(0) }}, {{ result.neutral_pct|default(0) }}, {{ result.negative_pct|default(0) }}],
+        labels: ['Positive', 'Neutral', 'Negative'],
+        type: 'pie',
+        marker: {
+            colors: ['#0d9488', '#d97706', '#e11d48'],
+            line: { color: '#ffffff', width: 2 }
+        },
+        hole: 0.4,
+        textinfo: 'label+percent',
+        hoverinfo: 'label+percent',
+        textfont: { color: '#0f172a', size: 11, family: 'Plus Jakarta Sans' }
+    }], {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+        font: { family: 'Plus Jakarta Sans', color: '#475569', size: 11 },
+        margin: { l: 20, r: 20, t: 20, b: 20 },
+        showlegend: false
+    }, { responsive: true, displayModeBar: false });
+});
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">⚙️ Settings</h1>
+        <p class="page-subtitle">Configure API connections, thresholds, and notification preferences</p>
+    </div>
+    <button class="btn btn-primary" onclick="saveSettings()" id="btn-save-settings">
+        💾 Save Changes
+    </button>
+</div>
+
+<div class="settings-grid">
+    <!-- API Connections -->
+    <div class="settings-section">
+        <h3>
+            🔗 API Connections
+        </h3>
+
+        <div class="form-group">
+            <label class="form-label">Fireflies.ai</label>
+            <div class="flex items-center gap-md mb-md">
+                {% if fireflies_configured %}
+                <span class="status-indicator status-connected">● Connected</span>
+                {% else %}
+                <span class="status-indicator status-disconnected">● Not Configured</span>
+                {% endif %}
+                <button class="btn btn-sm btn-secondary" onclick="testConnection()" id="btn-test-connection">
+                    Test Connection
+                </button>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-muted);">
+                Set your Fireflies API key in the <code>.env</code> file. <br>
+                Get your key from <a href="https://app.fireflies.ai/integrations" target="_blank">Fireflies Developer Settings</a>.
+            </p>
+        </div>
+
+
+
+        <div class="form-group">
+            <label class="form-label">Email Notifications</label>
+            {% if email_configured %}
+            <span class="status-indicator status-connected">● Configured</span>
+            {% else %}
+            <span class="status-indicator status-disconnected">● Not Configured</span>
+            {% endif %}
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+                Set SMTP credentials in <code>.env</code> to enable email alerts for moderate/severe warnings.
+            </p>
+        </div>
+    </div>
+
+    <!-- Sentiment Thresholds -->
+    <div class="settings-section">
+        <h3>📊 Warning Thresholds</h3>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 24px;">
+            Percentage of negative customer sentences required to trigger each warning level.
+        </p>
+
+        <div class="form-group">
+            <label class="form-label">
+                💡 Mild Warning
+                <span class="range-value" id="mild-value">{{ settings.threshold_mild }}%</span>
+            </label>
+            <input type="range" class="range-slider" id="threshold-mild"
+                   min="5" max="80" step="5" value="{{ settings.threshold_mild }}"
+                   oninput="document.getElementById('mild-value').textContent = this.value + '%'">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">
+                ⚠️ Moderate Warning
+                <span class="range-value" id="moderate-value">{{ settings.threshold_moderate }}%</span>
+            </label>
+            <input type="range" class="range-slider" id="threshold-moderate"
+                   min="10" max="90" step="5" value="{{ settings.threshold_moderate }}"
+                   oninput="document.getElementById('moderate-value').textContent = this.value + '%'">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">
+                🚨 Severe Warning
+                <span class="range-value" id="severe-value">{{ settings.threshold_severe }}%</span>
+            </label>
+            <input type="range" class="range-slider" id="threshold-severe"
+                   min="20" max="100" step="5" value="{{ settings.threshold_severe }}"
+                   oninput="document.getElementById('severe-value').textContent = this.value + '%'">
+        </div>
+    </div>
+
+    <!-- Ensemble Weights -->
+    <div class="settings-section">
+        <h3>⚖️ Analysis Weights</h3>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 24px;">
+            How much each sentiment tier contributes to the final score.
+        </p>
+
+        <div class="form-group">
+            <label class="form-label">
+                VADER (Rule-based)
+                <span class="range-value" id="weight-vader-value">{{ "%.0f"|format(settings.weight_vader|float * 100) }}%</span>
+            </label>
+            <input type="range" class="range-slider" id="weight-vader"
+                   min="0" max="100" step="5" value="{{ (settings.weight_vader|float * 100)|int }}"
+                   oninput="document.getElementById('weight-vader-value').textContent = this.value + '%'">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">
+                Transformer (Deep Learning)
+                <span class="range-value" id="weight-tf-value">{{ "%.0f"|format(settings.weight_transformer|float * 100) }}%</span>
+            </label>
+            <input type="range" class="range-slider" id="weight-transformer"
+                   min="0" max="100" step="5" value="{{ (settings.weight_transformer|float * 100)|int }}"
+                   oninput="document.getElementById('weight-tf-value').textContent = this.value + '%'">
+        </div>
+    </div>
+
+    <!-- Company Configuration -->
+    <div class="settings-section">
+        <h3>🏢 Company Configuration</h3>
+
+        <div class="form-group">
+            <label class="form-label">Company Email Domains</label>
+            <input type="text" class="form-input" id="company-domains"
+                   value="{{ settings.company_domains }}"
+                   placeholder="yourcompany.com, otherdomain.com">
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 6px;">
+                Comma-separated. Used to distinguish Placement (internal) vs Customer speakers.
+            </p>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Sync Interval (minutes)</label>
+            <input type="number" class="form-input" id="sync-interval"
+                   value="{{ settings.sync_interval }}" min="5" max="120" step="5">
+        </div>
+    </div>
+</div>
+
+<!-- Sync History -->
+<div class="card mt-lg">
+    <div class="card-header">
+        <h2 class="card-title">📋 Sync History</h2>
+    </div>
+    {% if sync_history %}
+    <div style="overflow-x: auto;">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Started</th>
+                    <th>Completed</th>
+                    <th>Fetched</th>
+                    <th>Analyzed</th>
+                    <th>Alerts</th>
+                    <th>Status</th>
+                    <th>Errors</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in sync_history %}
+                <tr>
+                    <td><span class="badge badge-none">{{ log.sync_type }}</span></td>
+                    <td>{{ log.started_at[:16] if log.started_at else 'N/A' }}</td>
+                    <td>{{ log.completed_at[:16] if log.completed_at else 'Running...' }}</td>
+                    <td>{{ log.transcripts_fetched }}</td>
+                    <td>{{ log.transcripts_analyzed }}</td>
+                    <td>{{ log.alerts_generated }}</td>
+                    <td>
+                        {% if log.status == 'completed' %}
+                        <span class="text-positive">✅ {{ log.status }}</span>
+                        {% elif log.status == 'running' %}
+                        <span class="text-accent">⏳ {{ log.status }}</span>
+                        {% else %}
+                        <span class="text-negative">❌ {{ log.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td style="max-width: 200px;" class="truncate text-muted">{{ log.errors or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-text">No sync history yet</div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function saveSettings() {
+    const data = {
+        threshold_mild: document.getElementById('threshold-mild').value,
+        threshold_moderate: document.getElementById('threshold-moderate').value,
+        threshold_severe: document.getElementById('threshold-severe').value,
+
+        weight_vader: (parseInt(document.getElementById('weight-vader').value) / 100).toFixed(2),
+        weight_transformer: (parseInt(document.getElementById('weight-transformer').value) / 100).toFixed(2),
+        company_domains: document.getElementById('company-domains').value,
+        sync_interval: document.getElementById('sync-interval').value,
+    };
+
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showToast('Settings saved successfully!', 'success');
+        } else {
+            showToast('Failed to save settings', 'error');
+        }
+    })
+    .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function testConnection() {
+    const btn = document.getElementById('btn-test-connection');
+    btn.classList.add('loading');
+    btn.textContent = 'Testing...';
+
+    fetch('/api/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    })
+    .then(r => r.json())
+    .then(result => {
+        btn.classList.remove('loading');
+        btn.textContent = 'Test Connection';
+        if (result.success) {
+            showToast(result.message, 'success');
+        } else {
+            showToast(result.message, 'error');
+        }
+    })
+    .catch(err => {
+        btn.classList.remove('loading');
+        btn.textContent = 'Test Connection';
+        showToast('Connection test failed: ' + err.message, 'error');
+    });
+}
+</script>
+{% endblock %}
